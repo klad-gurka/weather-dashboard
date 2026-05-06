@@ -1,0 +1,4 @@
+# API keys - don't commit these!
+.env
+*.env
+config.py
