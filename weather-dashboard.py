@@ -8,7 +8,6 @@ import urllib.request
 import json
 import os
 import requests
-import random
 from datetime import datetime
 
 ICONS_DIR = os.path.dirname(os.path.abspath(__file__)) + "/icons"
@@ -383,23 +382,30 @@ if active_pollen:
         
         px += box_w + box_spacing
 
-# === DAGENS CITAT (below pollen, with proper spacing) ===
-quotes = [
-    '"Det finns inga dumma frågor, bara dumma svar." - Okänd',
-    '"Innovation distingverar mellan en ledare och en följare." - Steve Jobs',
-    '"Bästa tiden att plantera ett träd var för 20 år sedan. Nästa bästa är nu." - Kinesisk ordspråk',
-    '"Framgång är inte final, misslyckande är inte dödendet." - Winston Churchill',
-    '"Den enda verkliga visdomen är att veta att man inget vet." - Sokrates',
-    '"Livet är vad som händer medan du gör andra planer." - John Lennon',
-    '"Var dig själv, alla andra är redan tagna." - Oscar Wilde',
-    '"Ingenting är omöjligt, ordet säger själv att jag är möjlig." - Audrey Hepburn',
-    '"Tro inte på allt du tänker." - Okänd',
-    '"En dag kommer du att vara det du tänker nu." - Okänd',
-    '"Morgondagen tillhör de som förbereder sig idag." - Okänd',
-    '"Små steg varje dag leder till stora förändringar." - Okänd',
+# === DAGENS CITAT (AI-generated, date-based for consistency) ===
+# Quotes are generated from a seed based on the date
+today_seed = int(datetime.now().strftime("%Y%m%d"))
+
+# A curated set of thoughtful quotes (seeded selection from date)
+quote_pool = [
+    '"Väder och stämning förändras – men djupet i oss förblir." - Okänd',
+    '"Regnet slutar alltid, och solen visar sig igen." - Okänd',
+    '"Varje dag är en ny chans att börja om." - Okänd',
+    '"Det vi söker utanför finns redan inom oss." - Okänd',
+    '"Tålamod är att förstå att allt har sin tid." - Okänd',
+    '"Bästa sättet att förutse vädret är att finna sig i det." - Okänd',
+    '"Litet steg framåt är fortfarande framåt." - Okänd',
+    '"Himlen är mörkast före gryningen." - Okänd',
+    '"Även den längsta resa börjar med ett steg." - Okänd',
+    '"Vi kan inte kontrollera vädret, men vi kan välja vår reaktion." - Okänd',
+    '"Allt som sker har ett syfte, även om vi inte alltid ser det." - Okänd',
+    '"Fred kommer inte från frånvaron av storm, utan från att hitta lugn i den." - Okänd',
+    '"Dagens arbete är morgondagens framgång." - Okänd',
+    '"Livet är som vädret – skiftande, men alltid i rörelse." - Okänd',
 ]
 
-quote = quotes[random.randint(0, len(quotes)-1)]
+# Pick quote based on day seed for consistency
+quote = quote_pool[today_seed % len(quote_pool)]
 quote_y = pollen_y + pollen_h + 25
 quote_w = draw.textlength(quote, font=font_small)
 draw.text(((W - quote_w) / 2, quote_y), quote, fill='#667788', font=font_small)
