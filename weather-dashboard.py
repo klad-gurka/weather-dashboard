@@ -317,7 +317,7 @@ def draw_temp_graph(draw, x, y, w, h, temps, precips, current_hour=None):
             # Temperature label at the point
             t_label = f"{temps[current_hour]:.0f}°"
             t_w = draw.textlength(t_label, font=font_small)
-            draw.text((cx - t_w / 2, cy - 16), t_label, fill='white', font=font_small)
+            draw.text((cx - t_w / 2, cy - 21), t_label, fill='white', font=font_small)
     
     # Horizontal grid lines for every degree — labels outside graph (to the left)
     for deg in range(int(min_temp), int(max_temp) + 1):
@@ -399,7 +399,8 @@ def draw_city_card(name, w_data, aqi_data, date_str):
         tx = graph_margin + 5 + label_cw * (idx + 0.5)
         label_str = str(idx)
         label_w = draw.textlength(label_str, font=font_small)
-        draw.text((tx - label_w / 2, graph_y + graph_h - 5), label_str, fill='#555566', font=font_small)
+        label_color = 'white' if idx in (8, 12, 16, 20) else '#8899aa'
+        draw.text((tx - label_w / 2, graph_y + graph_h - 5), label_str, fill=label_color, font=font_small)
     
     # === AIR QUALITY ===
     aq_y = graph_y + graph_h + 8
