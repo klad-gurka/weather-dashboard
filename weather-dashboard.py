@@ -31,7 +31,7 @@ weather_icons = {}
 for name in ["clear-day", "cloudy-1-day", "cloudy-2-day", "cloudy", "fog", 
              "rainy-1", "rainy-2", "rainy-3", "snowy-1", "snowy-2", "snowy-3", "thunderstorms"]:
     try:
-        weather_icons[name] = get_icon(name, 64)
+        weather_icons[name] = get_icon(name, 80)
     except:
         pass
 
@@ -100,7 +100,7 @@ def get_smhi(lat, lon, station_id=None):
         # Current = first entry (closest to now), but prioritize observation if available
         now_data = timeseries[0]["data"]
         weather_code = SMHI_TO_WMO.get(now_data.get("symbol_code", 1), 3)
-        wind_kmh = round(now_data.get("wind_speed", 0) * 3.6, 1)  # m/s → km/h
+        wind_ms = now_data.get("wind_speed", 0)  # SMHI uses m/s
         
         current_hour = datetime.now().hour
         current_temp = now_data.get("air_temperature", 0)
@@ -108,7 +108,7 @@ def get_smhi(lat, lon, station_id=None):
         current = {
             "temperature_2m": current_temp,
             "weather_code": weather_code,
-            "wind_speed_10m": wind_kmh,
+            "wind_speed_10m": wind_ms,
         }
         
         # Build midnight-to-midnight array (24 hours, local time)
@@ -344,7 +344,7 @@ except:
 # === CITY CARD HELPER ===
 def draw_city_card(name, w_data, aqi_data, date_str):
     """Draw a single city weather card, returns PIL Image."""
-    CW, CH = 650, 330
+    CW, CH = 650, 318
     img = Image.new('RGBA', (CW, CH), color='#0f0f1a')
     draw = ImageDraw.Draw(img)
     
@@ -362,44 +362,36 @@ def draw_city_card(name, w_data, aqi_data, date_str):
     icon_name = get_icon_name(current['weather_code'])
     icon = weather_icons.get(icon_name)
     
-    # === HEADER: name+date left, icon+temp+wind right on one row ===
+    # === HEADER: name/date left, temp/wind right ===
     
-    # Name + date left
     draw.text((15, 8), name, fill='white', font=font_title)
-    draw.text((15, 42), date_str, fill='#667788', font=font_data)
+    draw.text((15, 42), date_str, fill='#e6e6e6', font=font_data)
     
     temp_str = f"{current['temperature_2m']:.0f}°"
-    wind_val = f"{current['wind_speed_10m']:.0f}"
-    wind_str = f"{wind_val} km/h"
+    wind_val = f"{current['wind_speed_10m']:.1f}"
+    wind_str = f"{wind_val} m/s"
     
-    temp_w = int(draw.textlength(temp_str, font=font_temp))
-    wind_w = int(draw.textlength(wind_str, font=font_data))
-    icon_w = 64
-    gap_icon_temp = 6
-    gap_temp_wind = 34
+    temp_w = draw.textlength(temp_str, font=font_title)
+    wind_w = draw.textlength(wind_str, font=font_data)
     
-    # Right-aligned row: [icon] [temp] [wind]
-    icon_x = CW - 15 - icon_w - gap_icon_temp - temp_w - gap_temp_wind - wind_w
-    temp_x = icon_x + icon_w + gap_icon_temp
-    wind_x = temp_x + temp_w + gap_temp_wind
-    
-    if icon:
-        img.paste(icon, (icon_x, 4), icon)
-    draw.text((temp_x, 22), temp_str, fill='#ff6b6b', font=font_temp)
-    
+    draw.text((CW - 15 - temp_w, 8), temp_str, fill='#ff6b6b', font=font_title)
     if wind_icon:
-        img.paste(wind_icon, (wind_x - 26, 26), wind_icon)
-    draw.text((wind_x, 28), wind_str, fill='#4ecdc4', font=font_data)
+        img.paste(wind_icon, (CW - 15 - int(wind_w) - 26, 37), wind_icon)
+    draw.text((CW - 15 - wind_w, 42), wind_str, fill='#4ecdc4', font=font_data)
     
     # === GRAPH ===
     graph_margin = 40
-    graph_y = 80
+    graph_y = 65
     graph_w = CW - graph_margin - 15
     graph_h = 210
     
     current_hour = datetime.now().hour
     draw_temp_graph(draw, graph_margin + 5, graph_y + 10, graph_w - 10, graph_h - 20,
                    w_data['hourly']['temp'], w_data['hourly']['precip'], current_hour)
+    
+    # Icon drawn on top (absolute positioning, doesn't affect layout)
+    if icon:
+        img.paste(icon, (CW // 2 - 40, -4), icon)
     
     # Hour labels — centered in each column
     label_cw = (graph_w - 10) / 24  # same column width as graph
@@ -513,7 +505,10 @@ def draw_pollen_card(active_pollen, date_str):
 
 
 # === MAIN: FETCH DATA & GENERATE IMAGES ===
-date_str = datetime.now().strftime('%d %b')
+weekdays = ["Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag", "Lördag", "Söndag"]
+months = ["Januari", "Februari", "Mars", "April", "Maj", "Juni", "Juli", "Augusti", "September", "Oktober", "November", "December"]
+now = datetime.now()
+date_str = f"{weekdays[now.weekday()]} {now.day} {months[now.month - 1]}"
 
 locations = [
     {"name": "Göteborg", "lat": 57.7089, "lon": 11.9746, "station": "71420"},
