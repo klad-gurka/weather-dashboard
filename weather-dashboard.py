@@ -8,6 +8,7 @@ import urllib.request
 import json
 import os
 import requests
+import shutil
 from datetime import datetime
 
 ICONS_DIR = os.path.dirname(os.path.abspath(__file__)) + "/icons"
@@ -52,7 +53,153 @@ def get_icon_name(code):
     }
     return mapping.get(code, "cloudy")
 
-def get_weather(lat, lon):
+# SMHI symbol_code (1-27) → Open-Meteo WMO weather_code mapping
+SMHI_TO_WMO = {
+    1: 0,    # Clear sky
+    2: 1,    # Nearly clear sky
+    3: 2,    # Variable cloudiness
+    4: 2,    # Halfclear sky
+    5: 3,    # Cloudy sky
+    6: 3,    # Overcast
+    7: 45,   # Fog
+    8: 80,   # Light rain showers
+    9: 81,   # Moderate rain showers
+    10: 82,  # Heavy rain showers
+    11: 95,  # Thunderstorm
+    12: 80,  # Light sleet showers → treat as rain showers
+    13: 81,  # Moderate sleet showers
+    14: 82,  # Heavy sleet showers
+    15: 85,  # Light snow showers
+    16: 86,  # Moderate snow showers
+    17: 86,  # Heavy snow showers
+    18: 61,  # Light rain
+    19: 63,  # Moderate rain
+    20: 65,  # Heavy rain
+    21: 95,  # Thunder
+    22: 56,  # Light sleet
+    23: 57,  # Moderate sleet
+    24: 57,  # Heavy sleet
+    25: 71,  # Light snowfall
+    26: 73,  # Moderate snowfall
+    27: 75,  # Heavy snowfall
+}
+
+def get_smhi(lat, lon, station_id=None):
+    """Get weather forecast from SMHI, combined with observations for past hours.
+    
+    Returns midnight-to-midnight data: observations for past hours + forecast for future.
+    station_id: SMHI metobs station ID for historical observations (optional).
+    """
+    url = f"https://opendata-download-metfcst.smhi.se/api/category/snow1g/version/1/geotype/point/lon/{lon}/lat/{lat}/data.json"
+    try:
+        data = json.loads(urllib.request.urlopen(url, timeout=10).read().decode())
+        timeseries = data.get("timeSeries", [])
+        if not timeseries or len(timeseries) < 2:
+            return None
+        
+        # Current = first entry (closest to now), but prioritize observation if available
+        now_data = timeseries[0]["data"]
+        weather_code = SMHI_TO_WMO.get(now_data.get("symbol_code", 1), 3)
+        wind_kmh = round(now_data.get("wind_speed", 0) * 3.6, 1)  # m/s → km/h
+        
+        current_hour = datetime.now().hour
+        current_temp = now_data.get("air_temperature", 0)
+        
+        current = {
+            "temperature_2m": current_temp,
+            "weather_code": weather_code,
+            "wind_speed_10m": wind_kmh,
+        }
+        
+        # Build midnight-to-midnight array (24 hours, local time)
+        # First, get observations for past hours today
+        obs_temps = {}  # {local_hour: temperature}
+        
+        if station_id:
+            obs_url = f"https://opendata-download-metobs.smhi.se/api/version/latest/parameter/1/station/{station_id}/period/latest-day/data.json"
+            try:
+                obs_data = json.loads(urllib.request.urlopen(obs_url, timeout=10).read().decode())
+                for v in obs_data.get("value", []):
+                    from datetime import datetime as dt_mod, timezone
+                    obs_dt = dt_mod.fromtimestamp(v["date"] / 1000, tz=timezone.utc)
+                    local_hour = (obs_dt.hour + 2) % 24  # UTC+2 CEST
+                    obs_date_str = obs_dt.strftime("%Y-%m-%d")
+                    today_str = dt_mod.now(timezone.utc).strftime("%Y-%m-%d")
+                    # Only use today's observations
+                    if obs_date_str == today_str:
+                        obs_temps[local_hour] = float(v["value"])
+            except:
+                pass  # If obs fail, we'll use forecast for those hours
+        
+        # Override current temp with observation if available
+        if current_hour in obs_temps:
+            current["temperature_2m"] = obs_temps[current_hour]
+        
+        # Build forecast lookup: {local_hour: temperature} from today's date only
+        # (SMHI returns multiple days; we must filter by date to avoid tomorrow's data leaking in)
+        today_date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        fcst_temps = {}
+        fcst_precips = {}
+        for entry in timeseries:
+            t = entry["time"]
+            entry_date = t[:10]  # "2026-06-13"
+            if entry_date != today_date_str:
+                continue  # Skip entries from other days
+            fcst_hour = (int(t[11:13]) + 2) % 24  # UTC → local
+            d = entry["data"]
+            fcst_temps[fcst_hour] = d.get("air_temperature", 0)
+            fcst_precips[fcst_hour] = d.get("probability_of_precipitation", 0)
+        
+        # Build midnight-to-midnight: use observation if available, else forecast
+        temps = []
+        precips = []
+        hours = list(range(24))
+        
+        for h in range(24):
+            if h in obs_temps and obs_temps[h] is not None:
+                temps.append(obs_temps[h])
+            elif h in fcst_temps:
+                temps.append(fcst_temps[h])
+            else:
+                # Interpolate from nearest known values
+                temps.append(current["temperature_2m"])
+            
+            # Precipitation: use forecast if available, else 0
+            # (Only fill current hour from nearest forecast if missing)
+            if h in fcst_precips:
+                precips.append(fcst_precips[h])
+            elif h == datetime.now().hour:
+                # Current hour may be missing from forecast — use nearest
+                found = False
+                for offset in range(1, 24):
+                    for nh in ((h + offset) % 24, (h - offset) % 24):
+                        if nh in fcst_precips:
+                            precips.append(fcst_precips[nh])
+                            found = True
+                            break
+                    if found:
+                        break
+                if not found:
+                    precips.append(0)
+            else:
+                precips.append(0)
+        
+        return {
+            "current": current,
+            "hourly": {"temp": temps, "precip": precips, "hours": hours},
+        }
+    except Exception as e:
+        print(f"SMHI error: {e}")
+        return None
+
+def get_weather(lat, lon, station_id=None):
+    """Get weather forecast - tries SMHI first, falls back to Open-Meteo."""
+    # Try SMHI first (faster, more reliable for Swedish locations)
+    w = get_smhi(lat, lon, station_id)
+    if w:
+        return w, "smhi"
+    
+    # Fall back to Open-Meteo
     url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation_probability&timezone=Europe/Stockholm&forecast_days=2"
     try:
         data = json.loads(urllib.request.urlopen(url, timeout=10).read().decode())
@@ -62,9 +209,9 @@ def get_weather(lat, lon):
                 'temp': data['hourly']['temperature_2m'][24:48],
                 'precip': data['hourly']['precipitation_probability'][24:48],
             }
-        }
+        }, "openmeteo"
     except:
-        return None
+        return None, None
 
 def get_air_quality(lat, lon):
     """Get air quality from Open-Meteo"""
@@ -93,7 +240,7 @@ def get_aqi_status(aqi):
     else:
         return "Farligt", "#882222"
 
-def draw_temp_graph(draw, x, y, w, h, temps, precips):
+def draw_temp_graph(draw, x, y, w, h, temps, precips, current_hour=None):
     if not temps:
         return
     
@@ -108,197 +255,181 @@ def draw_temp_graph(draw, x, y, w, h, temps, precips):
     min_temp = min_temp - 1
     max_temp = max_temp + 1
     
-    # Precip bars
+    # Precip bars — 24 uniform columns
+    col_w = w / 24
     for i, p in enumerate(precips):
         if p > 25:
-            bar_x = x + (i * w // 24)
+            bar_x = int(x + col_w * i)
+            bar_w = max(1, int(x + col_w * (i + 1)) - bar_x)
             bar_h = int((p / 100) * h * 0.45)
-            draw.rectangle([bar_x, y + h - bar_h, bar_x + w // 24 - 1, y + h], 
+            draw.rectangle([bar_x, y + h - bar_h, bar_x + bar_w, y + h], 
                           fill=(80, 140, 255, 40 + p))
     
-    # Temp line with glow effect
+    # Temp line points — centered in each column
     points = []
     for i, t in enumerate(temps):
-        px = x + (i * w // 24) + 4
+        px = int(x + col_w * (i + 0.5))
         py = y + h - int(((t - min_temp) / (max_temp - min_temp)) * h)
         points.append((px, py))
     
     if len(points) > 1:
+        import math
+        
+        def make_thick_line(pts, thickness, color, round_joins=False):
+            """Draw a thick polyline as filled rectangles per segment + optional round joints."""
+            if len(pts) < 2:
+                return
+            t2 = thickness / 2
+            
+            # Draw each segment as a filled rectangle
+            for i in range(len(pts) - 1):
+                dx = pts[i+1][0] - pts[i][0]
+                dy = pts[i+1][1] - pts[i][1]
+                seg_len = math.hypot(dx, dy) or 1
+                nx = -dy / seg_len * t2  # perpendicular x
+                ny = dx / seg_len * t2   # perpendicular y
+                
+                x1, y1 = pts[i][0] + nx, pts[i][1] + ny
+                x2, y2 = pts[i][0] - nx, pts[i][1] - ny
+                x3, y3 = pts[i+1][0] - nx, pts[i+1][1] - ny
+                x4, y4 = pts[i+1][0] + nx, pts[i+1][1] + ny
+                
+                draw.polygon([x1, y1, x2, y2, x3, y3, x4, y4], fill=color)
+            
+            # Round joints as circles at data points
+            if round_joins:
+                for px, py in pts:
+                    draw.ellipse([px - t2, py - t2, px + t2, py + t2], fill=color)
+        
+        # Glow layers
         for glow in range(3, 0, -1):
-            glow_points = [(px, py - glow * 2) for px, py in points]
-            draw.line(glow_points, fill=(255, 107, 107, 50), width=glow * 2)
+            make_thick_line(points, glow * 2, (255, 107, 107, 50), round_joins=True)
         
-        draw.line(points, fill='#ff6b6b', width=3)
+        # Main line
+        make_thick_line(points, 3, '#ff6b6b', round_joins=True)
         
-        for px, py in points[::3]:
-            draw.ellipse([px-4, py-4, px+4, py+4], fill='#ff6b6b', outline='#fff', width=1)
-            draw.ellipse([px-2, py-2, px+2, py+2], fill='#fff')
+        # Current hour marker + temperature label
+        if current_hour is not None and 0 <= current_hour < len(points):
+            cx, cy = points[current_hour]
+            # Larger dot at current hour
+            draw.ellipse([cx-5, cy-5, cx+5, cy+5], fill='#ff6b6b', outline='#fff', width=2)
+            draw.ellipse([cx-2, cy-2, cx+2, cy+2], fill='#fff')
+            # Temperature label at the point
+            t_label = f"{temps[current_hour]:.0f}°"
+            t_w = draw.textlength(t_label, font=font_small)
+            draw.text((cx - t_w / 2, cy - 16), t_label, fill='white', font=font_small)
+    
+    # Horizontal grid lines for every degree — labels outside graph (to the left)
+    for deg in range(int(min_temp), int(max_temp) + 1):
+        ratio = (deg - min_temp) / (max_temp - min_temp)
+        gy = y + h - int(ratio * h)
+        # Thin line starting at graph edge (x)
+        draw.line([x, gy, x + w, gy], fill='#2a2a44', width=1)
+        # Label inside graph area (not outside)
+        if gy < y + h - 14:
+            label = f"{deg}°"
+            label_w = draw.textlength(label, font=font_label)
+            draw.text((x - 4 - label_w, gy - 6), label, fill='#8899aa', font=font_label)
 
-# === MAIN IMAGE ===
-W, H = 1000, 720
-img = Image.new('RGB', (W, H), color='#0f0f1a')
-draw = ImageDraw.Draw(img)
-
-# Subtle gradient
-for y in range(H):
-    alpha = int(y / H * 15)
-    draw.line([0, y, W, y], fill=(30, 30, 50, alpha))
-
-# Fonts
+# === FONTS ===
 try:
-    font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 32)
-    font_city = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24)
+    font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 30)
     font_temp = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 36)
     font_data = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
     font_label = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 13)
     font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 11)
 except:
-    font_title = font_city = font_temp = font_data = font_label = font_small = ImageFont.load_default()
+    font_title = font_temp = font_data = font_label = font_small = ImageFont.load_default()
 
-# Header
-title = f"Väder & Luftkvalitet • {datetime.now().strftime('%d %b')}"
-title_w = draw.textlength(title, font=font_title)
-draw.text(((W - title_w) / 2, 20), title, fill='white', font=font_title)
-
-# Decorative line
-draw.line([50, 60, W - 50, 60], fill='#334455', width=1)
-
-# Data
-locations = [
-    {"name": "Göteborg", "lat": 57.7089, "lon": 11.9746},
-    {"name": "Mölndal", "lat": 57.6561, "lon": 12.0176},
-    {"name": "Rävlanda", "lat": 57.68, "lon": 12.50},
-]
-
-col_w = (W - 80) // 3
-x = 40
-
-for loc in locations:
-    w = get_weather(loc['lat'], loc['lon'])
-    aqi = get_air_quality(loc['lat'], loc['lon'])
+# === CITY CARD HELPER ===
+def draw_city_card(name, w_data, aqi_data, date_str):
+    """Draw a single city weather card, returns PIL Image."""
+    CW, CH = 650, 330
+    img = Image.new('RGBA', (CW, CH), color='#0f0f1a')
+    draw = ImageDraw.Draw(img)
     
-    # Card background
-    card_y = 80
-    card_h = 500
-    draw.rounded_rectangle([x, card_y, x + col_w - 10, card_y + card_h], radius=12, 
-                          fill='#1a1a2e', outline='#2a2a4e', width=2)
+    # Gradient background
+    for yp in range(CH):
+        alpha = int(yp / CH * 15)
+        draw.line([0, yp, CW, yp], fill=(30, 30, 50, alpha))
     
-    if not w:
-        # City name at top
-        city_y = card_y + 30
-        city_w = draw.textlength(loc['name'], font=font_city)
-        draw.text((x + col_w // 2 - city_w // 2, city_y), loc['name'], fill='white', font=font_city)
-        
-        # Show error message filling the rest of the card
-        error_top = card_y + 70
-        error_bottom = card_y + card_h - 10
-        error_h = error_bottom - error_top
-        
-        draw.rounded_rectangle([x + 20, error_top, x + col_w - 30, error_bottom], radius=8,
-                              fill='#2a1a1a', outline='#4a2a2a', width=1)
-        error_lines = ["API-fel:", "Kunde inte hämta", "väder för denna", "stad"]
-        total_line_h = len(error_lines) * 25
-        start_y = error_top + (error_h - total_line_h) // 2
-        for i, line in enumerate(error_lines):
-            error_w = draw.textlength(line, font=font_data)
-            draw.text((x + col_w // 2 - error_w // 2, start_y + i * 25), line, fill='#dd6666', font=font_data)
-        x += col_w
-        continue
+    if not w_data:
+        error_w = draw.textlength("Kunde inte hämta väder", font=font_data)
+        draw.text(((CW - error_w) / 2, CH / 2), "Kunde inte hämta väder", fill='#dd6666', font=font_data)
+        return img
     
-    current = w['current']
+    current = w_data['current']
     icon_name = get_icon_name(current['weather_code'])
     icon = weather_icons.get(icon_name)
     
-    # Weather icon (above city name)
-    if icon:
-        img.paste(icon, (x + col_w // 2 - 32, card_y + 20), icon)
+    # === HEADER: name+date left, icon+temp+wind right on one row ===
     
-    # City name (below icon)
-    city_y = card_y + 95
-    city_w = draw.textlength(loc['name'], font=font_city)
-    draw.text((x + col_w // 2 - city_w // 2, city_y), loc['name'], fill='white', font=font_city)
+    # Name + date left
+    draw.text((15, 8), name, fill='white', font=font_title)
+    draw.text((15, 42), date_str, fill='#667788', font=font_data)
     
-    # Big temp
-    temp_y = city_y + 35
     temp_str = f"{current['temperature_2m']:.0f}°"
-    temp_w = draw.textlength(temp_str, font=font_temp)
-    draw.text((x + col_w // 2 - temp_w // 2, temp_y), temp_str, fill='#ff6b6b', font=font_temp)
-    
-    # Wind
-    # Wind with icon
     wind_val = f"{current['wind_speed_10m']:.0f}"
     wind_str = f"{wind_val} km/h"
     
-    # Draw wind icon next to text
-    if wind_icon:
-        img.paste(wind_icon, (x + col_w // 2 - 40, temp_y + 42), wind_icon)
+    temp_w = int(draw.textlength(temp_str, font=font_temp))
+    wind_w = int(draw.textlength(wind_str, font=font_data))
+    icon_w = 64
+    gap_icon_temp = 6
+    gap_temp_wind = 34
     
-    wind_w = draw.textlength(wind_str, font=font_data)
-    draw.text((x + col_w // 2 - wind_w // 2 + 15, temp_y + 45), wind_str, fill='#4ecdc4', font=font_data)
+    # Right-aligned row: [icon] [temp] [wind]
+    icon_x = CW - 15 - icon_w - gap_icon_temp - temp_w - gap_temp_wind - wind_w
+    temp_x = icon_x + icon_w + gap_icon_temp
+    wind_x = temp_x + temp_w + gap_temp_wind
+    
+    if icon:
+        img.paste(icon, (icon_x, 4), icon)
+    draw.text((temp_x, 22), temp_str, fill='#ff6b6b', font=font_temp)
+    
+    if wind_icon:
+        img.paste(wind_icon, (wind_x - 26, 26), wind_icon)
+    draw.text((wind_x, 28), wind_str, fill='#4ecdc4', font=font_data)
     
     # === GRAPH ===
-    graph_y = temp_y + 115
-    graph_w = col_w - 50
-    graph_h = 110
+    graph_margin = 40
+    graph_y = 80
+    graph_w = CW - graph_margin - 15
+    graph_h = 210
     
-    draw.text((x + 20, graph_y - 20), "24h prognos", fill='#888899', font=font_label)
+    current_hour = datetime.now().hour
+    draw_temp_graph(draw, graph_margin + 5, graph_y + 10, graph_w - 10, graph_h - 20,
+                   w_data['hourly']['temp'], w_data['hourly']['precip'], current_hour)
     
-    draw.rounded_rectangle([x + 15, graph_y, x + col_w - 25, graph_y + graph_h], radius=8,
-                          fill='#252540', outline='#3a3a5e', width=1)
-    
-    draw_temp_graph(draw, x + 20, graph_y + 10, graph_w - 10, graph_h - 15,
-                   w['hourly']['temp'], w['hourly']['precip'])
-    
-    # Min/Max temps on graph - move away from edges
-    temps = w['hourly']['temp']
-    if temps:
-        min_t = min(temps)
-        max_t = max(temps)
-        draw.text((x + 20, graph_y + 12), f"{max_t:.0f}°", fill='#ff6b6b', font=font_small)
-        draw.text((x + 20, graph_y + graph_h - 18), f"{min_t:.0f}°", fill='#ff6b6b', font=font_small)
-    
-    for idx, label in enumerate(["00", "06", "12", "18", "24"]):
-        tx = x + 20 + (idx * (graph_w - 10) // 4)
-        draw.text((tx, graph_y + graph_h + 4), label, fill='#666677', font=font_small)
+    # Hour labels — centered in each column
+    label_cw = (graph_w - 10) / 24  # same column width as graph
+    for idx in range(24):
+        tx = graph_margin + 5 + label_cw * (idx + 0.5)
+        label_str = str(idx)
+        label_w = draw.textlength(label_str, font=font_small)
+        draw.text((tx - label_w / 2, graph_y + graph_h - 5), label_str, fill='#555566', font=font_small)
     
     # === AIR QUALITY ===
-    aq_y = graph_y + graph_h + 40
-    draw.text((x + 20, aq_y - 18), "Luftkvalitet", fill='#888899', font=font_label)
+    aq_y = graph_y + graph_h + 8
     
-    # AQI card
-    draw.rounded_rectangle([x + 15, aq_y, x + col_w - 25, aq_y + 120], radius=8,
-                          fill='#1e1e30', outline='#3a3a5e', width=1)
-    
-    # AQI icon
-    if aqi_icon:
-        img.paste(aqi_icon, (x + col_w // 2 - 20, aq_y + 15), aqi_icon)
-    
-    if aqi:
-        aqi_val = aqi.get('us_aqi', 0)
+    if aqi_data:
+        aqi_val = aqi_data.get('us_aqi', 0)
         aqi_status, aqi_color = get_aqi_status(aqi_val)
         
-        # US AQI value - centered
-        aqi_text = str(aqi_val)
-        aqi_text_w = draw.textlength(aqi_text, font=font_temp)
-        draw.text((x + col_w // 2 - aqi_text_w // 2, aq_y + 10), aqi_text, fill=aqi_color, font=font_temp)
+        pm25 = aqi_data.get('pm2_5', 0)
+        pm10 = aqi_data.get('pm10', 0)
         
-        # Status - centered
-        status_w = draw.textlength(aqi_status, font=font_data)
-        draw.text((x + col_w // 2 - status_w // 2, aq_y + 50), aqi_status, fill=aqi_color, font=font_data)
-        
-        # PM values - centered
-        pm25 = aqi.get('pm2_5', 0)
-        pm10 = aqi.get('pm10', 0)
-        pm_text = f"PM2.5: {pm25:.1f}  PM10: {pm10:.1f}"
-        pm_w = draw.textlength(pm_text, font=font_small)
-        draw.text((x + col_w // 2 - pm_w // 2, aq_y + 80), pm_text, fill='#aaaacc', font=font_small)
+        line = f"Luftkvalitet {aqi_val} {aqi_status}  •  PM2.5: {pm25:.1f}  PM10: {pm10:.1f}"
+        line_w = draw.textlength(line, font=font_data)
+        draw.text(((CW - line_w) / 2, aq_y + 8), line, fill=aqi_color, font=font_data)
     else:
-        no_w = draw.textlength("Ingen data", font=font_data)
-        draw.text((x + col_w // 2 - no_w // 2, aq_y + 30), "Ingen data", fill='#666677', font=font_data)
+        no_w = draw.textlength("Ingen luftdata", font=font_data)
+        draw.text(((CW - no_w) / 2, aq_y + 8), "Ingen luftdata", fill='#666677', font=font_data)
     
-    x += col_w
+    return img
 
-# === POLLEN (single wide row, only level > 0) ===
+
+# === POLLEN CARD ===
 POLLEN_REGION = "2a2a2a2a-2a2a-4a2a-aa2a-2a2a2a303a38"  # Göteborg
 
 POLLEN_LEVELS = {0: "Inga", 1: "Låga", 2: "Låga-måttliga", 3: "Måttliga", 
@@ -338,36 +469,32 @@ def get_pollen():
         print(f"Pollen error: {e}")
         return {}
 
-# Get pollen and filter to only show level > 0
-pollen_data = get_pollen()
-today = datetime.now().strftime("%Y-%m-%d")
-
-# Filter to only pollen with level > 0
-active_pollen = []
-for pollen_id, levels in pollen_data.items():
-    level = levels.get(today, 0)
-    if level > 0:
-        active_pollen.append((pollen_id, level))
-
-if active_pollen:
-    pollen_y = 595
-    pollen_h = 75
+def draw_pollen_card(active_pollen, date_str):
+    """Draw pollen forecast as a standalone image."""
+    PW, PH = 650, 130
+    img = Image.new('RGBA', (PW, PH), color='#0f0f1a')
+    draw = ImageDraw.Draw(img)
     
-    # Single wide row
-    draw.rounded_rectangle([20, pollen_y, W - 20, pollen_y + pollen_h], radius=10,
+    for yp in range(PH):
+        alpha = int(yp / PH * 15)
+        draw.line([0, yp, PW, yp], fill=(30, 30, 50, alpha))
+    
+    draw.rounded_rectangle([10, 10, PW - 10, PH - 10], radius=10,
                           fill='#1a1a2e', outline='#2a2a4e', width=2)
     
-    draw.text((40, pollen_y + 8), "🐝 Pollen", fill='white', font=font_data)
+    title = f"Pollen • {date_str}"
+    title_w = draw.textlength(title, font=font_title)
+    draw.text(((PW - title_w) / 2, 12), title, fill='white', font=font_title)
     
-    # Draw each active pollen type with equal spacing
+    if not active_pollen:
+        no_w = draw.textlength("Inga aktiva pollen idag", font=font_data)
+        draw.text(((PW - no_w) / 2, 65), "Inga aktiva pollen idag", fill='#44dd44', font=font_data)
+        return img
+    
     box_w = 100
-    box_spacing = 20
-    total_boxes_w = len(active_pollen) * box_w + (len(active_pollen) - 1) * box_spacing
-    # Center boxes in the remaining space after the label
-    label_w = 100  # Approximate width of "🐝 Pollen"
-    remaining_w = W - 20 - label_w - 40
-    total_row_w = remaining_w
-    start_x = label_w + 40 + (total_row_w - total_boxes_w) // 2
+    box_spacing = 15
+    total_w = len(active_pollen) * box_w + (len(active_pollen) - 1) * box_spacing
+    start_x = (PW - total_w) // 2
     
     px = start_x
     for pollen_id, level in active_pollen:
@@ -375,49 +502,64 @@ if active_pollen:
         level_name = POLLEN_LEVELS.get(level, "?")
         level_color = POLLEN_COLORS.get(level, "#888888")
         
-        draw.rounded_rectangle([px, pollen_y + 10, px + box_w, pollen_y + 55], radius=6,
+        draw.rounded_rectangle([px, 48, px + box_w, 100], radius=6,
                               fill='#252540', outline=level_color, width=2)
-        draw.text((px + 8, pollen_y + 14), pollen_name, fill='#aaaacc', font=font_small)
-        draw.text((px + 8, pollen_y + 35), level_name, fill=level_color, font=font_small)
+        draw.text((px + 8, 52), pollen_name, fill='#aaaacc', font=font_small)
+        draw.text((px + 8, 74), level_name, fill=level_color, font=font_small)
         
         px += box_w + box_spacing
+    
+    return img
 
-# === DAGENS CITAT (AI-generated, date-based for consistency) ===
-# Quotes are generated from a seed based on the date
-today_seed = int(datetime.now().strftime("%Y%m%d"))
 
-# A curated set of thoughtful quotes (seeded selection from date)
-quote_pool = [
-    '"Väder och stämning förändras – men djupet i oss förblir." - Okänd',
-    '"Regnet slutar alltid, och solen visar sig igen." - Okänd',
-    '"Varje dag är en ny chans att börja om." - Okänd',
-    '"Det vi söker utanför finns redan inom oss." - Okänd',
-    '"Tålamod är att förstå att allt har sin tid." - Okänd',
-    '"Bästa sättet att förutse vädret är att finna sig i det." - Okänd',
-    '"Litet steg framåt är fortfarande framåt." - Okänd',
-    '"Himlen är mörkast före gryningen." - Okänd',
-    '"Även den längsta resa börjar med ett steg." - Okänd',
-    '"Vi kan inte kontrollera vädret, men vi kan välja vår reaktion." - Okänd',
-    '"Allt som sker har ett syfte, även om vi inte alltid ser det." - Okänd',
-    '"Fred kommer inte från frånvaron av storm, utan från att hitta lugn i den." - Okänd',
-    '"Dagens arbete är morgondagens framgång." - Okänd',
-    '"Livet är som vädret – skiftande, men alltid i rörelse." - Okänd',
+# === MAIN: FETCH DATA & GENERATE IMAGES ===
+date_str = datetime.now().strftime('%d %b')
+
+locations = [
+    {"name": "Göteborg", "lat": 57.7089, "lon": 11.9746, "station": "71420"},
+    {"name": "Mölndal", "lat": 57.6561, "lon": 12.0176, "station": "71420"},
+    {"name": "Rävlanda", "lat": 57.68, "lon": 12.50, "station": "72420"},
 ]
 
-# Pick quote based on day seed for consistency
-quote = quote_pool[today_seed % len(quote_pool)]
-quote_y = pollen_y + pollen_h + 25
-quote_w = draw.textlength(quote, font=font_small)
-draw.text(((W - quote_w) / 2, quote_y), quote, fill='#667788', font=font_small)
+# Fetch all data
+city_data = []
+for loc in locations:
+    w, source = get_weather(loc['lat'], loc['lon'], loc.get('station'))
+    aqi = get_air_quality(loc['lat'], loc['lon'])
+    city_data.append((loc['name'], w, aqi))
 
-# Footer
-draw.text((20, H - 20), "Väder: Open-Meteo  |  Luft: Open-Meteo AQI", fill='#444455', font=font_small)
+# Fetch pollen
+pollen_data = get_pollen()
+today = datetime.now().strftime("%Y-%m-%d")
+active_pollen = []
+for pollen_id, levels in pollen_data.items():
+    level = levels.get(today, 0)
+    if level > 0:
+        active_pollen.append((pollen_id, level))
 
-# Save at 2x resolution
-img.save("/tmp/weather-report-base.png")
+# Generate and save city images
+image_files = []
+for i, (name, w, aqi) in enumerate(city_data):
+    card = draw_city_card(name, w, aqi, date_str)
+    path = f"/tmp/weather-{i}.png"
+    card.save(path)
+    image_files.append(path)
 
-from PIL import Image as PILImage
-base_img = PILImage.open("/tmp/weather-report-base.png")
-img = base_img.resize((2000, 1440), PILImage.LANCZOS)
-img.save("/tmp/weather-report.png")
-print("Klar! 🌿")
+# Generate and save pollen image
+pollen_card = draw_pollen_card(active_pollen, date_str)
+pollen_path = "/tmp/weather-pollen.png"
+pollen_card.save(pollen_path)
+image_files.append(pollen_path)
+
+# Resize each individual image to 2x for crispness
+for path in image_files:
+    base = Image.open(path).convert("RGB")
+    w2, h2 = base.size
+    scaled = base.resize((w2 * 2, h2 * 2), Image.LANCZOS)
+    scaled.save(path)
+
+# Save first city image as legacy file for cron compatibility
+if image_files:
+    shutil.copyfile(image_files[0], "/tmp/weather-report.png")
+
+print(f"Klar! 🌿 ({len(image_files)} bilder)")
