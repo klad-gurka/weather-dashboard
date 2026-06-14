@@ -366,10 +366,6 @@ def draw_city_card(name, w_data, aqi_data, date_str):
     icon_name = get_icon_name(current['weather_code'])
     icon = weather_icons.get(icon_name)
     
-    # Draw icon first (before text, so text renders on top)
-    if icon:
-        img.paste(icon, (CW // 2 - 40, -4), icon)
-    
     # === HEADER: name/date left, temp/wind right ===
     
     draw.text((15, 8), name, fill='white', font=font_title)
@@ -405,6 +401,10 @@ def draw_city_card(name, w_data, aqi_data, date_str):
         label_w = draw.textlength(label_str, font=font_small)
         label_color = 'white' if idx in (8, 12, 16, 20) else '#8899aa'
         draw.text((tx - label_w / 2, graph_y + graph_h - 5), label_str, fill=label_color, font=font_small)
+    
+    # Weather icon drawn on top of graph (if overlap)
+    if icon:
+        img.paste(icon, (CW // 2 + 135, -4), icon)
     
     # === AIR QUALITY ===
     aq_y = graph_y + graph_h + 8
