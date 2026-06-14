@@ -261,7 +261,7 @@ def draw_temp_graph(draw, x, y, w, h, temps, precips, current_hour=None):
         if p > 25:
             bar_x = int(x + col_w * i)
             bar_w = max(1, int(x + col_w * (i + 1)) - bar_x)
-            bar_h = int((p / 100) * h * 0.45)
+            bar_h = int((p / 100) * h)
             draw.rectangle([bar_x, y + h - bar_h, bar_x + bar_w, y + h], 
                           fill=(80, 140, 255, 40 + p))
     
