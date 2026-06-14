@@ -345,13 +345,17 @@ except:
 def draw_city_card(name, w_data, aqi_data, date_str):
     """Draw a single city weather card, returns PIL Image."""
     CW, CH = 650, 318
-    img = Image.new('RGBA', (CW, CH), color='#0f0f1a')
+    img = Image.new('RGBA', (CW, CH), color='#12121e')
     draw = ImageDraw.Draw(img)
     
-    # Gradient background
+    # Gradient via alpha overlay (no alpha interference with text)
+    gradient = Image.new('RGBA', (CW, CH), (0, 0, 0, 0))
+    gdraw = ImageDraw.Draw(gradient)
     for yp in range(CH):
-        alpha = int(yp / CH * 15)
-        draw.line([0, yp, CW, yp], fill=(30, 30, 50, alpha))
+        alpha = int(yp / CH * 18)
+        gdraw.line([0, yp, CW, yp], fill=(0, 0, 0, alpha))
+    img = Image.alpha_composite(img, gradient)
+    draw = ImageDraw.Draw(img)
     
     if not w_data:
         error_w = draw.textlength("Kunde inte hämta väder", font=font_data)
@@ -361,6 +365,10 @@ def draw_city_card(name, w_data, aqi_data, date_str):
     current = w_data['current']
     icon_name = get_icon_name(current['weather_code'])
     icon = weather_icons.get(icon_name)
+    
+    # Draw icon first (before text, so text renders on top)
+    if icon:
+        img.paste(icon, (CW // 2 - 40, -4), icon)
     
     # === HEADER: name/date left, temp/wind right ===
     
@@ -388,10 +396,6 @@ def draw_city_card(name, w_data, aqi_data, date_str):
     current_hour = datetime.now().hour
     draw_temp_graph(draw, graph_margin + 5, graph_y + 10, graph_w - 10, graph_h - 20,
                    w_data['hourly']['temp'], w_data['hourly']['precip'], current_hour)
-    
-    # Icon drawn on top (absolute positioning, doesn't affect layout)
-    if icon:
-        img.paste(icon, (CW // 2 - 40, -4), icon)
     
     # Hour labels — centered in each column
     label_cw = (graph_w - 10) / 24  # same column width as graph
