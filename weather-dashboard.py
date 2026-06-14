@@ -416,7 +416,7 @@ def draw_city_card(name, w_data, aqi_data, date_str):
         pm25 = aqi_data.get('pm2_5', 0)
         pm10 = aqi_data.get('pm10', 0)
         
-        line = f"Luftkvalitet {aqi_val} {aqi_status}  •  PM2.5: {pm25:.1f}  PM10: {pm10:.1f}"
+        line = f"Luftkvalitet: {aqi_val} {aqi_status}  •  PM2.5: {pm25:.1f} µg/m³  •  PM10: {pm10:.1f} µg/m³"
         line_w = draw.textlength(line, font=font_data)
         draw.text(((CW - line_w) / 2, aq_y + 8), line, fill=aqi_color, font=font_data)
     else:
