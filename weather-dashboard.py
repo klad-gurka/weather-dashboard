@@ -320,9 +320,13 @@ def draw_temp_graph(draw, x, y, w, h, temps, precips, current_hour=None):
             draw.text((cx - t_w / 2, cy - 21), t_label, fill='white', font=font_small)
     
     # Horizontal grid lines for every degree — labels outside graph (to the left)
+    bottom_padding = 14  # reserve space for hour labels
     for deg in range(int(min_temp), int(max_temp) + 1):
         ratio = (deg - min_temp) / (max_temp - min_temp)
         gy = y + h - int(ratio * h)
+        # Skip line if it would overlap/underlap the hour numbers at the bottom
+        if gy >= y + h - bottom_padding:
+            continue
         # Thin line starting at graph edge (x)
         draw.line([x, gy, x + w, gy], fill='#2a2a44', width=1)
         # Label inside graph area (not outside)
