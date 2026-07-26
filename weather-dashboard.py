@@ -436,6 +436,9 @@ POLLEN_REGION = "2a2a2a2a-2a2a-4a2a-aa2a-2a2a2a303a38"  # Göteborg
 POLLEN_LEVELS = {0: "Inga", 1: "Låga", 2: "Låga-måttliga", 3: "Måttliga", 
                  4: "Måttliga-höga", 5: "Höga", 6: "Höga-mycket höga", 7: "Mycket höga"}
 
+POLLEN_EMOJI = {0: "🟢", 1: "🟡", 2: "🟡", 3: "🟠",
+                4: "🟠", 5: "🔴", 6: "🔴", 7: "⛔"}
+
 POLLEN_COLORS = {0: "#44dd44", 1: "#88dd44", 2: "#dddd44", 3: "#ddbb44",
                  4: "#ddaa44", 5: "#dd8844", 6: "#dd6644", 7: "#dd4444"}
 
@@ -554,6 +557,19 @@ pollen_card = draw_pollen_card(active_pollen, date_str)
 pollen_path = "/tmp/weather-pollen.png"
 pollen_card.save(pollen_path)
 image_files.append(pollen_path)
+
+# Generate pollen text file for text-based posting
+pollen_txt = f"🌿 **Pollen · {date_str}**\n"
+if not active_pollen:
+    pollen_txt += "🟢 Inga aktiva pollen idag"
+else:
+    for pollen_id, level in active_pollen:
+        name = POLLEN_NAMES.get(pollen_id, pollen_id[:8])
+        emoji = POLLEN_EMOJI.get(level, "⚪")
+        level_name = POLLEN_LEVELS.get(level, "?")
+        pollen_txt += f"{emoji} **{name}**: {level_name}\n"
+with open("/tmp/weather-pollen.txt", "w", encoding="utf-8") as f:
+    f.write(pollen_txt.strip())
 
 # Resize each individual image to 2x for crispness
 for path in image_files:
