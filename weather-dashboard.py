@@ -436,7 +436,7 @@ POLLEN_REGION = "2a2a2a2a-2a2a-4a2a-aa2a-2a2a2a303a38"  # Göteborg
 POLLEN_LEVELS = {0: "Inga", 1: "Låga", 2: "Låga-måttliga", 3: "Måttliga", 
                  4: "Måttliga-höga", 5: "Höga", 6: "Höga-mycket höga", 7: "Mycket höga"}
 
-POLLEN_EMOJI = {0: "🟢", 1: "🟡", 2: "🟡", 3: "🟠",
+POLLEN_EMOJI = {0: "🟢", 1: "🟢", 2: "🟡", 3: "🟠",
                 4: "🟠", 5: "🔴", 6: "🔴", 7: "⛔"}
 
 POLLEN_COLORS = {0: "#44dd44", 1: "#88dd44", 2: "#dddd44", 3: "#ddbb44",
