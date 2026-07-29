@@ -320,7 +320,7 @@ def draw_temp_graph(draw, x, y, w, h, temps, precips, current_hour=None):
             # Temperature label at the point
             t_label = f"{temps[current_hour]:.0f}°"
             t_w = draw.textlength(t_label, font=font_title)
-            draw.text((cx - t_w / 2, cy - 30), t_label, fill='white', font=font_title)
+            draw.text((cx - t_w / 2, cy - 35), t_label, fill='white', font=font_title)
     
     # Horizontal grid lines for every degree — labels outside graph (to the left)
     bottom_padding = 14  # reserve space for hour labels
