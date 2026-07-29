@@ -319,8 +319,8 @@ def draw_temp_graph(draw, x, y, w, h, temps, precips, current_hour=None):
             draw.ellipse([cx-2, cy-2, cx+2, cy+2], fill='#fff')
             # Temperature label at the point
             t_label = f"{temps[current_hour]:.0f}°"
-            t_w = draw.textlength(t_label, font=font_data)
-            draw.text((cx - t_w / 2, cy - 24), t_label, fill='white', font=font_data)
+            t_w = draw.textlength(t_label, font=font_title)
+            draw.text((cx - t_w / 2, cy - 30), t_label, fill='white', font=font_title)
     
     # Horizontal grid lines for every degree — labels outside graph (to the left)
     bottom_padding = 14  # reserve space for hour labels
