@@ -184,6 +184,9 @@ def get_smhi(lat, lon, station_id=None):
             else:
                 precips.append(0)
         
+        # Sync grafens current-hour-punkt med röda temp-siffran
+        temps[current_hour] = current["temperature_2m"]
+        
         return {
             "current": current,
             "hourly": {"temp": temps, "precip": precips, "hours": hours},
