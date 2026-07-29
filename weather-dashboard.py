@@ -408,7 +408,7 @@ def draw_city_card(name, w_data, aqi_data, date_str):
     
     # Weather icon drawn on top of graph (if overlap)
     if icon:
-        img.paste(icon, (CW // 2 + 135, -4), icon)
+        img.paste(icon, (CW // 2 + 95, -4), icon)
     
     # === AIR QUALITY ===
     aq_y = graph_y + graph_h + 8
