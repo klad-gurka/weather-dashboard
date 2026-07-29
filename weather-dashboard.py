@@ -375,7 +375,7 @@ def draw_city_card(name, w_data, aqi_data, date_str):
     draw.text((15, 8), name, fill='white', font=font_title)
     draw.text((15, 42), date_str, fill='#e6e6e6', font=font_data)
     
-    temp_str = f"{current['temperature_2m']:.0f}°"
+    temp_str = f"{min(w_data['hourly']['temp']):.0f}°–{max(w_data['hourly']['temp']):.0f}°"
     wind_val = f"{current['wind_speed_10m']:.1f}"
     wind_str = f"{wind_val} m/s"
     
