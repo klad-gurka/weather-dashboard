@@ -310,17 +310,6 @@ def draw_temp_graph(draw, x, y, w, h, temps, precips, current_hour=None):
         
         # Main line
         make_thick_line(points, 3, '#ff6b6b', round_joins=True)
-        
-        # Current hour marker + temperature label
-        if current_hour is not None and 0 <= current_hour < len(points):
-            cx, cy = points[current_hour]
-            # Larger dot at current hour
-            draw.ellipse([cx-5, cy-5, cx+5, cy+5], fill='#ff6b6b', outline='#fff', width=2)
-            draw.ellipse([cx-2, cy-2, cx+2, cy+2], fill='#fff')
-            # Temperature label at the point
-            t_label = f"{temps[current_hour]:.0f}°"
-            t_w = draw.textlength(t_label, font=font_title)
-            draw.text((cx - t_w / 2, cy - 35), t_label, fill='white', font=font_title)
     
     # Horizontal grid lines for every degree — labels outside graph (to the left)
     bottom_padding = 14  # reserve space for hour labels
@@ -337,6 +326,17 @@ def draw_temp_graph(draw, x, y, w, h, temps, precips, current_hour=None):
             label = f"{deg}°"
             label_w = draw.textlength(label, font=font_label)
             draw.text((x - 4 - label_w, gy - 6), label, fill='#8899aa', font=font_label)
+    
+    # Current hour marker + temperature label (drawn LAST to be on top of everything)
+    if current_hour is not None and 0 <= current_hour < len(points):
+        cx, cy = points[current_hour]
+        # Larger dot at current hour
+        draw.ellipse([cx-5, cy-5, cx+5, cy+5], fill='#ff6b6b', outline='#fff', width=2)
+        draw.ellipse([cx-2, cy-2, cx+2, cy+2], fill='#fff')
+        # Temperature label at the point
+        t_label = f"{temps[current_hour]:.0f}°"
+        t_w = draw.textlength(t_label, font=font_title)
+        draw.text((cx - t_w / 2, cy - 35), t_label, fill='white', font=font_title)
 
 # === FONTS ===
 try:
