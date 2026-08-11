@@ -304,14 +304,8 @@ def draw_temp_graph(draw, x, y, w, h, temps, precips, current_hour=None):
                 for px, py in pts:
                     draw.ellipse([px - t2, py - t2, px + t2, py + t2], fill=color)
         
-        # Glow layers
-        for glow in range(3, 0, -1):
-            make_thick_line(points, glow * 2, (255, 107, 107, 50), round_joins=True)
-        
-        # Main line
-        make_thick_line(points, 3, '#ff6b6b', round_joins=True)
-    
     # Horizontal grid lines for every degree — labels outside graph (to the left)
+    # Drawn FIRST so they're behind the temperature curve
     bottom_padding = 14  # reserve space for hour labels
     for deg in range(int(min_temp), int(max_temp) + 1):
         ratio = (deg - min_temp) / (max_temp - min_temp)
@@ -327,6 +321,15 @@ def draw_temp_graph(draw, x, y, w, h, temps, precips, current_hour=None):
             label_w = draw.textlength(label, font=font_label)
             draw.text((x - 4 - label_w, gy - 6), label, fill='#8899aa', font=font_label)
     
+    # Draw the temperature curve
+    if points:
+        # Glow layers
+        for glow in range(3, 0, -1):
+            make_thick_line(points, glow * 2, (255, 107, 107, 50), round_joins=True)
+        
+        # Main line
+        make_thick_line(points, 3, '#ff6b6b', round_joins=True)
+    
     # Current hour marker + temperature label (drawn LAST to be on top of everything)
     if current_hour is not None and 0 <= current_hour < len(points):
         cx, cy = points[current_hour]
@@ -337,7 +340,7 @@ def draw_temp_graph(draw, x, y, w, h, temps, precips, current_hour=None):
         t_label = f"{temps[current_hour]:.0f}°"
         t_w = draw.textlength(t_label, font=font_title)
         draw.text((cx - t_w / 2, cy - 40), t_label, fill='white', font=font_title)
-
+    
 # === FONTS ===
 try:
     font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 30)
